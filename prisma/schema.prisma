@@ -1,0 +1,977 @@
+// ============================================================
+// TAVERNA D&D VTT — Complete Prisma Schema
+// Secure, optimized, fully relational
+// ============================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+// ============================================================
+// AUTH — Users, Accounts, Sessions (Auth.js / NextAuth v5)
+// ============================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  displayName   String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?   // null for OAuth-only users
+  role          UserRole  @default(USER)
+  isBanned      Boolean   @default(false)
+  banReason     String?
+  bannedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  // Auth.js relations
+  accounts Account[]
+  sessions Session[]
+
+  // Game relations
+  ownedCampaigns    Campaign[]         @relation("CampaignDM")
+  memberships       CampaignMember[]
+  characters        Character[]
+  chatMessages      ChatMessage[]
+  journalEntries    JournalEntry[]
+  diceMacros        DiceMacro[]
+  rollableTables    RollableTable[]
+  achievements      Achievement[]
+  dmSessions        GameSession[]       @relation("SessionDM")
+  auditLogs         AuditLog[]
+  reportsSubmitted  Report[]            @relation("ReportsSubmitted")
+  reportsResolved   Report[]            @relation("ReportsResolved")
+  loreEntries       LoreEntry[]
+  questVotes        QuestVote[]
+  rumors            Rumor[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+// ============================================================
+// CAMPAIGNS
+// ============================================================
+
+model Campaign {
+  id           String         @id @default(cuid())
+  name         String
+  description  String         @default("")
+  setting      String         @default("")
+  ruleSet      String         @default("D&D 5e")
+  status       CampaignStatus @default(ACTIVE)
+  imageUrl     String?
+  inviteCode   String         @unique @default(cuid())
+  maxPlayers   Int            @default(6)
+  sessionCount Int            @default(0)
+  dmId         String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  lastPlayedAt DateTime?
+
+  dm      User             @relation("CampaignDM", fields: [dmId], references: [id], onDelete: Cascade)
+  members CampaignMember[]
+
+  // Game data
+  characters     Character[]
+  npcs           NPC[]
+  chatMessages   ChatMessage[]
+  gameSessions   GameSession[]
+  mapScenes      MapScene[]
+  journalEntries JournalEntry[]
+  diceMacros     DiceMacro[]
+  rollableTables RollableTable[]
+  audioTracks    AudioTrack[]
+  timelineEvents TimelineEvent[]
+  achievements   Achievement[]
+  relationships  CharacterRelationship[]
+  encounters     EncounterTemplate[]
+  sessionNotes   SessionNote[]
+  loreEntries    LoreEntry[]
+  quests         Quest[]
+  rumors         Rumor[]
+
+  @@index([dmId])
+  @@index([inviteCode])
+  @@map("campaigns")
+}
+
+model CampaignMember {
+  id         String       @id @default(cuid())
+  userId     String
+  campaignId String
+  role       CampaignRole @default(PLAYER)
+  joinedAt   DateTime     @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, campaignId])
+  @@index([campaignId])
+  @@map("campaign_members")
+}
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum CampaignRole {
+  DM
+  PLAYER
+  SPECTATOR
+}
+
+// ============================================================
+// CHARACTERS (Full D&D 5e)
+// ============================================================
+
+model Character {
+  id               String @id @default(cuid())
+  campaignId       String
+  playerId         String
+  name             String
+  race             String
+  class            String
+  level            Int    @default(1)
+  alignment        String @default("True Neutral")
+  background       String @default("")
+  abilityScores    Json   // { strength, dexterity, constitution, intelligence, wisdom, charisma }
+  hp               Json   // { current, max, temp }
+  armorClass       Int    @default(10)
+  initiative       Int    @default(0)
+  speed            Int    @default(30)
+  proficiencyBonus Int    @default(2)
+  savingThrows     Json   @default("{}") // { strength: true, ... }
+  skills           Json   @default("[]") // Skill[]
+  spellSlots       Json   @default("[]") // SpellSlot[]
+  inventory        Json   @default("[]") // Item[]
+  deathSaves       Json   @default("{\"successes\":0,\"failures\":0}")
+  traits           String @default("")
+  ideals           String @default("")
+  bonds            String @default("")
+  flaws            String @default("")
+  backstory        String @default("") @db.Text
+  notes            String @default("") @db.Text
+  avatarUrl        String?
+  // v2 fields
+  currency         Json?    // { cp, sp, ep, gp, pp }
+  knownSpells      Json?    // KnownSpell[]
+  classLevels      Json?    // ClassLevel[] for multiclass
+  feats            Json?    // Feat[]
+  hitDiceRemaining Int?
+  inspirationPoints Int?   @default(0)
+  experiencePoints  Int?   @default(0)
+  concentratingOn   String?
+  temporaryEffects  Json?  // string[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  player   User     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  // Linked tokens & initiative
+  mapTokens         MapToken[]
+  initiativeEntries InitiativeEntry[]
+
+  @@index([campaignId])
+  @@index([playerId])
+  @@map("characters")
+}
+
+// ============================================================
+// NPCs (DM Tools)
+// ============================================================
+
+model NPC {
+  id          String  @id @default(cuid())
+  campaignId  String
+  name        String
+  race        String  @default("")
+  description String  @default("") @db.Text
+  personality String  @default("")
+  motivation  String  @default("")
+  stats       Json?   // Partial<AbilityScores>
+  hp          Int?
+  armorClass  Int?
+  isAlive     Boolean @default(true)
+  location    String?
+  notes       String  @default("") @db.Text
+  imageUrl    String?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  quests   Quest[]
+
+  @@index([campaignId])
+  @@map("npcs")
+}
+
+// ============================================================
+// CHAT & MESSAGING
+// ============================================================
+
+model ChatMessage {
+  id              String      @id @default(cuid())
+  campaignId      String
+  senderId        String
+  senderName      String
+  type            MessageType
+  content         String      @db.Text
+  channel         ChatChannel @default(GENERAL)
+  diceResult      Json?       // DiceResult
+  combatResult    Json?       // CombatResult
+  whisperTo       String?
+  whisperToName   String?
+  characterName   String?
+  pinned          Boolean     @default(false)
+  reactions       Json?       // ChatReaction[]
+  replyToId       String?
+  replyToPreview  String?
+  replyToSender   String?
+  mentions        Json?       // string[]
+  mentionEveryone Boolean     @default(false)
+  editedAt        DateTime?
+  createdAt       DateTime    @default(now())
+
+  campaign Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sender   User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo  ChatMessage? @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies  ChatMessage[] @relation("MessageReplies")
+
+  @@index([campaignId, channel])
+  @@index([campaignId, createdAt])
+  @@index([senderId])
+  @@map("chat_messages")
+}
+
+enum MessageType {
+  TEXT
+  DICE
+  WHISPER
+  SYSTEM
+  NARRATION
+  EMOTE
+  OOC
+  COMBAT
+}
+
+enum ChatChannel {
+  GENERAL
+  COMBAT
+  LORE
+  OFF_TOPIC
+  WHISPERS
+}
+
+// ============================================================
+// GAME SESSIONS (Live Play)
+// ============================================================
+
+model GameSession {
+  id               String        @id @default(cuid())
+  campaignId       String
+  sessionNumber    Int
+  status           SessionStatus @default(LOBBY)
+  dmId             String
+  connectedPlayers Json          @default("[]") // string[]
+  currentRound     Int           @default(0)
+  activeSceneId    String?
+  startedAt        DateTime?
+  endedAt          DateTime?
+  createdAt        DateTime      @default(now())
+
+  campaign          Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  dm                User              @relation("SessionDM", fields: [dmId], references: [id])
+  initiativeEntries InitiativeEntry[]
+  combatLog         CombatLogEntry[]
+  combatActions     CombatAction[]
+
+  @@index([campaignId])
+  @@index([campaignId, status])
+  @@map("game_sessions")
+}
+
+model InitiativeEntry {
+  id              String  @id @default(cuid())
+  sessionId       String
+  name            String
+  initiative      Int
+  isNPC           Boolean @default(false)
+  isActive        Boolean @default(false)
+  hp              Json?   // { current, max }
+  armorClass      Int?
+  conditions      Json    @default("[]") // string[]
+  concentratingOn String?
+  tokenId         String?
+  characterId     String?
+
+  session   GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  character Character?  @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@map("initiative_entries")
+}
+
+model CombatLogEntry {
+  id        String   @id @default(cuid())
+  sessionId String
+  round     Int
+  turn      String
+  action    String   @db.Text
+  result    String   @db.Text
+  createdAt DateTime @default(now())
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("combat_log_entries")
+}
+
+enum SessionStatus {
+  LOBBY
+  LIVE
+  PAUSED
+  ENDED
+}
+
+// ============================================================
+// TACTICAL MAP
+// ============================================================
+
+model MapScene {
+  id              String   @id @default(cuid())
+  campaignId      String
+  name            String
+  gridType        String   @default("square")
+  gridSize        Int      @default(40)
+  width           Int      @default(30)
+  height          Int      @default(20)
+  backgroundImage String?  @db.Text
+  backgroundColor String   @default("#1a1a2e")
+  fogRevealed     Json     @default("[]")
+  ambientTrackId  String?
+  isActive        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  campaign Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  tokens   MapToken[]
+  walls    Wall[]
+  lights   LightSource[]
+  drawings MapDrawing[]
+
+  @@index([campaignId])
+  @@map("map_scenes")
+}
+
+model MapToken {
+  id                String  @id @default(cuid())
+  sceneId           String
+  name              String
+  x                 Int     @default(0)
+  y                 Int     @default(0)
+  size              Int     @default(1)
+  color             String  @default("#c9a96e")
+  label             String  @default("")
+  isPC              Boolean @default(false)
+  characterId       String?
+  initiativeEntryId String?
+  hp                Json?
+  conditions        Json    @default("[]")
+  vision            Int     @default(6)
+  darkvision        Int     @default(0)
+  lightRadius       Int     @default(0)
+  dimLightRadius    Int     @default(0)
+  hidden            Boolean @default(false)
+  imageUrl          String?
+
+  scene     MapScene   @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@index([sceneId])
+  @@map("map_tokens")
+}
+
+model Wall {
+  id             String  @id @default(cuid())
+  sceneId        String
+  x1             Float
+  y1             Float
+  x2             Float
+  y2             Float
+  blocksMovement Boolean @default(true)
+  blocksVision   Boolean @default(true)
+  isDoor         Boolean @default(false)
+  isOpen         Boolean @default(false)
+
+  scene MapScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  @@index([sceneId])
+  @@map("walls")
+}
+
+model LightSource {
+  id           String  @id @default(cuid())
+  sceneId      String
+  x            Float
+  y            Float
+  brightRadius Int     @default(4)
+  dimRadius    Int     @default(8)
+  color        String  @default("#ffcc44")
+  enabled      Boolean @default(true)
+
+  scene MapScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  @@index([sceneId])
+  @@map("light_sources")
+}
+
+model MapDrawing {
+  id        String  @id @default(cuid())
+  sceneId   String
+  type      String
+  points    Json
+  color     String  @default("#ffffff")
+  fillColor String?
+  lineWidth Int     @default(2)
+  text      String?
+  width     Float?
+  height    Float?
+  radius    Float?
+  angle     Float?
+  length    Float?
+  visible   Boolean @default(true)
+
+  scene MapScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  @@index([sceneId])
+  @@map("map_drawings")
+}
+
+// ============================================================
+// JOURNAL & HANDOUTS
+// ============================================================
+
+model JournalEntry {
+  id         String      @id @default(cuid())
+  campaignId String
+  title      String
+  content    String      @default("") @db.Text
+  type       JournalType @default(JOURNAL)
+  imageUrl   String?
+  visibleTo  Json        @default("[]")
+  createdBy  String
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [createdBy], references: [id])
+
+  @@index([campaignId])
+  @@map("journal_entries")
+}
+
+enum JournalType {
+  JOURNAL
+  HANDOUT
+  SECRET
+}
+
+// ============================================================
+// DICE MACROS & ROLLABLE TABLES
+// ============================================================
+
+model DiceMacro {
+  id         String @id @default(cuid())
+  campaignId String
+  name       String
+  formula    String
+  label      String?
+  createdBy  String
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [createdBy], references: [id])
+
+  @@index([campaignId])
+  @@map("dice_macros")
+}
+
+model RollableTable {
+  id          String @id @default(cuid())
+  campaignId  String
+  name        String
+  entries     Json
+  diceFormula String @default("1d100")
+  createdBy   String
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [createdBy], references: [id])
+
+  @@index([campaignId])
+  @@map("rollable_tables")
+}
+
+// ============================================================
+// AUDIO TRACKS
+// ============================================================
+
+model AudioTrack {
+  id         String  @id @default(cuid())
+  campaignId String
+  name       String
+  url        String
+  type       String  @default("ambient")
+  volume     Float   @default(0.5)
+  loop       Boolean @default(true)
+  category   String  @default("general")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@map("audio_tracks")
+}
+
+// ============================================================
+// TIMELINE & ACHIEVEMENTS
+// ============================================================
+
+model TimelineEvent {
+  id            String   @id @default(cuid())
+  campaignId    String
+  title         String
+  description   String   @default("") @db.Text
+  inGameDate    String?
+  realDate      DateTime @default(now())
+  sessionNumber Int      @default(1)
+  type          String   @default("story")
+  icon          String?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@map("timeline_events")
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  icon        String   @default("⭐")
+  type        String   @default("milestone")
+  earnedAt    DateTime @default(now())
+  campaignId  String?
+  playerId    String?
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  player   User?     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([name, playerId])
+  @@index([playerId])
+  @@map("achievements")
+}
+
+// ============================================================
+// CHARACTER RELATIONSHIPS
+// ============================================================
+
+model CharacterRelationship {
+  id                String @id @default(cuid())
+  campaignId        String
+  fromCharacterId   String
+  fromCharacterName String
+  toCharacterId     String
+  toCharacterName   String
+  type              String @default("neutral")
+  description       String @default("")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@map("character_relationships")
+}
+
+// ============================================================
+// ENCOUNTER TEMPLATES
+// ============================================================
+
+model EncounterTemplate {
+  id         String @id @default(cuid())
+  campaignId String
+  name       String
+  monsters   Json
+  difficulty String @default("medium")
+  xpTotal    Int    @default(0)
+  notes      String @default("") @db.Text
+  createdBy  String
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@map("encounter_templates")
+}
+
+// ============================================================
+// SESSION NOTES
+// ============================================================
+
+model SessionNote {
+  id            String   @id @default(cuid())
+  campaignId    String
+  sessionNumber Int
+  title         String
+  content       String   @default("") @db.Text
+  dmPrivate     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@map("session_notes")
+}
+
+// ============================================================
+// ADMIN — Audit Log, Reports, System Settings
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String   // e.g. "user.ban", "campaign.delete", "settings.update"
+  targetType String?  // e.g. "User", "Campaign"
+  targetId   String?
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Report {
+  id           String       @id @default(cuid())
+  reporterId   String
+  targetType   String       // "User", "Campaign", "ChatMessage"
+  targetId     String
+  reason       String
+  description  String       @default("") @db.Text
+  status       ReportStatus @default(PENDING)
+  resolvedById String?
+  resolution   String?      @db.Text
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  reporter   User  @relation("ReportsSubmitted", fields: [reporterId], references: [id], onDelete: Cascade)
+  resolvedBy User? @relation("ReportsResolved", fields: [resolvedById], references: [id])
+
+  @@index([status])
+  @@index([reporterId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  label     String   // Human-readable label
+  category  String   @default("general") // "general", "security", "limits", "features"
+  type      String   @default("string")  // "string", "number", "boolean", "json"
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([category])
+  @@map("system_settings")
+}
+
+// ============================================================
+// FEATURE: World Lore Wiki
+// ============================================================
+
+model LoreEntry {
+  id          String   @id @default(cuid())
+  campaignId  String
+  title       String
+  slug        String   // URL-friendly unique within campaign
+  category    LoreCategory @default(MISC)
+  content     String   @default("") @db.Text  // Markdown
+  summary     String   @default("") @db.Text  // Short description
+  imageUrl    String?
+  tags        String[] // array of tags
+  isSecret    Boolean  @default(false) // Hidden from players
+  mapPinX     Float?   // Position on world map (0-100 %)
+  mapPinY     Float?
+  parentId    String?  // Hierarchical (e.g. Region > City > Building)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign  Campaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  parent    LoreEntry? @relation("LoreHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  LoreEntry[] @relation("LoreHierarchy")
+  createdBy User       @relation(fields: [createdById], references: [id])
+
+  // Bi-directional links
+  linksFrom LoreLink[] @relation("LoreLinkFrom")
+  linksTo   LoreLink[] @relation("LoreLinkTo")
+
+  @@unique([campaignId, slug])
+  @@index([campaignId, category])
+  @@index([campaignId, isSecret])
+  @@map("lore_entries")
+}
+
+model LoreLink {
+  id       String @id @default(cuid())
+  fromId   String
+  toId     String
+  label    String @default("") // e.g. "ally of", "located in"
+
+  from LoreEntry @relation("LoreLinkFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to   LoreEntry @relation("LoreLinkTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+  @@map("lore_links")
+}
+
+enum LoreCategory {
+  NPC
+  LOCATION
+  FACTION
+  ITEM
+  EVENT
+  LORE
+  DEITY
+  CREATURE
+  MISC
+}
+
+// ============================================================
+// FEATURE: Quest Board & Story Tracker
+// ============================================================
+
+model Quest {
+  id          String      @id @default(cuid())
+  campaignId  String
+  title       String
+  description String      @default("") @db.Text
+  status      QuestStatus @default(HIDDEN)
+  priority    Int         @default(0) // 0=normal, 1=main, 2=urgent
+  giverNpcId  String?     // NPC who gave the quest
+  rewardXP    Int         @default(0)
+  rewardGold  Int         @default(0)
+  rewardItems String[]    // item names
+  parentId    String?     // For sub-quests / story arcs
+  sortOrder   Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  campaign   Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  giverNpc   NPC?           @relation(fields: [giverNpcId], references: [id], onDelete: SetNull)
+  parent     Quest?         @relation("QuestHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Quest[]        @relation("QuestHierarchy")
+  objectives QuestObjective[]
+  votes      QuestVote[]
+  rumors     Rumor[]
+
+  @@index([campaignId, status])
+  @@map("quests")
+}
+
+model QuestObjective {
+  id          String  @id @default(cuid())
+  questId     String
+  title       String
+  description String  @default("")
+  isCompleted Boolean @default(false)
+  isFailed    Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  // Branching: if completing this objective reveals another
+  branchQuestId String? // Quest to unlock when this objective is done
+
+  quest Quest @relation(fields: [questId], references: [id], onDelete: Cascade)
+
+  @@index([questId])
+  @@map("quest_objectives")
+}
+
+model QuestVote {
+  id        String   @id @default(cuid())
+  questId   String
+  userId    String
+  vote      Int      @default(1) // 1 = interested, -1 = not interested
+  createdAt DateTime @default(now())
+
+  quest Quest @relation(fields: [questId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([questId, userId])
+  @@map("quest_votes")
+}
+
+model Rumor {
+  id         String   @id @default(cuid())
+  campaignId String
+  questId    String?  // optionally linked to quest
+  content    String   @db.Text
+  source     String   @default("Unknown") // NPC name or "Tavern gossip"
+  isVerified Boolean  @default(false) // DM marked as true
+  postedById String
+  createdAt  DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  quest    Quest?   @relation(fields: [questId], references: [id], onDelete: SetNull)
+  postedBy User     @relation(fields: [postedById], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@map("rumors")
+}
+
+enum QuestStatus {
+  HIDDEN     // DM only
+  AVAILABLE  // On the quest board for players
+  ACTIVE     // Players accepted
+  COMPLETED
+  FAILED
+  ABANDONED
+}
+
+// ============================================================
+// FEATURE: Combat Autopilot
+// ============================================================
+
+model CombatAction {
+  id            String   @id @default(cuid())
+  sessionId     String
+  round         Int
+  turnOrder     Int
+  actorName     String   // Token name or character name
+  actorTokenId  String?  // Link to MapToken
+  actionType    CombatActionType
+  targetName    String?
+  targetTokenId String?
+
+  // Attack details
+  attackRoll    Int?
+  attackBonus   Int?
+  attackTotal   Int?
+  targetAC      Int?
+  isHit         Boolean?
+  isCritical    Boolean?
+  isFumble      Boolean?
+  advantage     String?  // "normal", "advantage", "disadvantage"
+
+  // Damage details
+  damageRoll    String?  // e.g. "2d6+3"
+  damageTotal   Int?
+  damageType    String?  // "slashing", "fire", etc.
+  hpBefore      Int?
+  hpAfter       Int?
+
+  // Save details
+  saveType      String?  // "CON", "DEX", etc.
+  saveDC        Int?
+  saveRoll      Int?
+  saveResult    Boolean? // pass or fail
+  
+  // Concentration
+  concentrationCheck Boolean @default(false)
+  concentrationLost  Boolean @default(false)
+
+  // Reaction
+  reactionUsed   String?  // "Shield", "Uncanny Dodge", etc.
+  reactionResult String?  @db.Text
+
+  // Description for combat replay
+  description    String   @default("") @db.Text
+  createdAt      DateTime @default(now())
+
+  session GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, round, turnOrder])
+  @@map("combat_actions")
+}
+
+enum CombatActionType {
+  ATTACK
+  SPELL
+  ABILITY
+  SAVE
+  HEAL
+  MOVEMENT
+  REACTION
+  LEGENDARY_ACTION
+  LAIR_ACTION
+  BONUS_ACTION
+  DEATH_SAVE
+  OTHER
+}

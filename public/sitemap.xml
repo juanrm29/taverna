@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://taverna.app/</loc><priority>1.0</priority></url>
+  <url><loc>https://taverna.app/compendium</loc><priority>0.8</priority></url>
+  <url><loc>https://taverna.app/compendium/spells</loc><priority>0.7</priority></url>
+  <url><loc>https://taverna.app/compendium/monsters</loc><priority>0.7</priority></url>
+  <url><loc>https://taverna.app/compendium/equipment</loc><priority>0.7</priority></url>
+  <url><loc>https://taverna.app/compendium/classes</loc><priority>0.7</priority></url>
+  <url><loc>https://taverna.app/compendium/races</loc><priority>0.7</priority></url>
+  <url><loc>https://taverna.app/compendium/rules</loc><priority>0.7</priority></url>
+</urlset>
